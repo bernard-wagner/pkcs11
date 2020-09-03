@@ -530,4 +530,61 @@ func ExampleCtx_Sign() {
 	// Output: It works!
 }
 
+// ExampleSign shows how to sign some data with a private key.
+// Note: error correction is not implemented in this example.
+func ExampleCtx_SignNull() {
+	lib := "/usr/lib/softhsm/libsofthsm.so"
+	if x := os.Getenv("SOFTHSM_LIB"); x != "" {
+		lib = x
+	}
+	p := New(lib)
+	if p == nil {
+		log.Fatal("Failed to init lib")
+	}
+
+	p.Initialize()
+	defer p.Destroy()
+	defer p.Finalize()
+	slots, _ := p.GetSlotList(true)
+	session, _ := p.OpenSession(slots[0], CKF_SERIAL_SESSION|CKF_RW_SESSION)
+	defer p.CloseSession(session)
+	p.Login(session, CKU_USER, "1234")
+	defer p.Logout(session)
+	publicKeyTemplate := []*Attribute{
+		NewAttribute(CKA_CLASS, CKO_PUBLIC_KEY),
+		NewAttribute(CKA_KEY_TYPE, CKK_RSA),
+		NewAttribute(CKA_TOKEN, false),
+		NewAttribute(CKA_ENCRYPT, true),
+		NewAttribute(CKA_PUBLIC_EXPONENT, []byte{3}),
+		NewAttribute(CKA_MODULUS_BITS, 1024),
+		NewAttribute(CKA_LABEL, "ExampleSign"),
+	}
+	privateKeyTemplate := []*Attribute{
+		NewAttribute(CKA_CLASS, CKO_PRIVATE_KEY),
+		NewAttribute(CKA_KEY_TYPE, CKK_RSA),
+		NewAttribute(CKA_TOKEN, false),
+		NewAttribute(CKA_PRIVATE, true),
+		NewAttribute(CKA_SIGN, true),
+		NewAttribute(CKA_LABEL, "ExampleSign"),
+	}
+	_, priv, err := p.GenerateKeyPair(session,
+		[]*Mechanism{NewMechanism(CKM_RSA_PKCS_KEY_PAIR_GEN, nil)},
+		publicKeyTemplate, privateKeyTemplate)
+	if err != nil {
+		log.Fatal(err)
+	}
+	p.SignInit(session, []*Mechanism{NewMechanism(CKM_SHA1_RSA_PKCS, nil)}, priv)
+
+	size, err := p.SignNull(session, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if size == 0 {
+		log.Fatalf("Failed %v", size)
+	}
+	fmt.Printf("It works!")
+	// Output: It works!
+}
+
 // Copyright 2013 Miek Gieben. All rights reserved.

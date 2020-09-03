@@ -357,11 +357,13 @@ CK_RV Encrypt(struct ctx * c, CK_SESSION_HANDLE session, CK_BYTE_PTR message,
 	if (rv != CKR_OK) {
 		return rv;
 	}
-	*enc = calloc(*enclen, sizeof(CK_BYTE));
-	if (*enc == NULL) {
-		return CKR_HOST_MEMORY;
+	if (enc != NULL) {
+		*enc = calloc(*enclen, sizeof(CK_BYTE));
+		if (*enc == NULL) {
+			return CKR_HOST_MEMORY;
+		}
+		rv = c->sym->C_Encrypt(session, message, mlen, *enc, enclen);
 	}
-	rv = c->sym->C_Encrypt(session, message, mlen, *enc, enclen);
 	return rv;
 }
 
@@ -411,11 +413,13 @@ CK_RV Decrypt(struct ctx * c, CK_SESSION_HANDLE session, CK_BYTE_PTR cipher,
 	if (e != CKR_OK) {
 		return e;
 	}
-	*plain = calloc(*plainlen, sizeof(CK_BYTE));
-	if (*plain == NULL) {
-		return CKR_HOST_MEMORY;
+	if (plain != NULL) {
+		*plain = calloc(*plainlen, sizeof(CK_BYTE));
+		if (*plain == NULL) {
+			return CKR_HOST_MEMORY;
+		}
+		e = c->sym->C_Decrypt(session, cipher, clen, *plain, plainlen);
 	}
-	e = c->sym->C_Decrypt(session, cipher, clen, *plain, plainlen);
 	return e;
 }
 
@@ -465,11 +469,13 @@ CK_RV Digest(struct ctx * c, CK_SESSION_HANDLE session, CK_BYTE_PTR message,
 	if (rv != CKR_OK) {
 		return rv;
 	}
-	*hash = calloc(*hashlen, sizeof(CK_BYTE));
-	if (*hash == NULL) {
-		return CKR_HOST_MEMORY;
+	if (hash != NULL) {
+		*hash = calloc(*hashlen, sizeof(CK_BYTE));
+		if (*hash == NULL) {
+			return CKR_HOST_MEMORY;
+		}
+		rv = c->sym->C_Digest(session, message, mlen, *hash, hashlen);
 	}
-	rv = c->sym->C_Digest(session, message, mlen, *hash, hashlen);
 	return rv;
 }
 
@@ -514,11 +520,13 @@ CK_RV Sign(struct ctx * c, CK_SESSION_HANDLE session, CK_BYTE_PTR message,
 	if (rv != CKR_OK) {
 		return rv;
 	}
-	*sig = calloc(*siglen, sizeof(CK_BYTE));
-	if (*sig == NULL) {
-		return CKR_HOST_MEMORY;
+	if (sig != NULL) {
+		*sig = calloc(*siglen, sizeof(CK_BYTE));
+		if (*sig == NULL) {
+			return CKR_HOST_MEMORY;
+		}
+		rv = c->sym->C_Sign(session, message, mlen, *sig, siglen);
 	}
-	rv = c->sym->C_Sign(session, message, mlen, *sig, siglen);
 	return rv;
 }
 
@@ -770,9 +778,10 @@ static inline CK_VOID_PTR getAttributePval(CK_ATTRIBUTE_PTR a)
 
 */
 import "C"
-import "strings"
-
-import "unsafe"
+import (
+	"strings"
+	"unsafe"
+)
 
 // Ctx contains the current pkcs11 context.
 type Ctx struct {
@@ -1166,6 +1175,18 @@ func (c *Ctx) Encrypt(sh SessionHandle, message []byte) ([]byte, error) {
 	return s, nil
 }
 
+// EncryptNull encrypts single-part data.
+func (c *Ctx) EncryptNull(sh SessionHandle, message []byte) (int, error) {
+	var (
+		enclen C.CK_ULONG
+	)
+	e := C.Encrypt(c.ctx, C.CK_SESSION_HANDLE(sh), cMessage(message), C.CK_ULONG(len(message)), nil, &enclen)
+	if toError(e) != nil {
+		return 0, toError(e)
+	}
+	return int(enclen), nil
+}
+
 // EncryptUpdate continues a multiple-part encryption operation.
 func (c *Ctx) EncryptUpdate(sh SessionHandle, plain []byte) ([]byte, error) {
 	var (
@@ -1219,6 +1240,18 @@ func (c *Ctx) Decrypt(sh SessionHandle, cipher []byte) ([]byte, error) {
 	return s, nil
 }
 
+// DecryptNull decrypts encrypted data in a single part.
+func (c *Ctx) DecryptNull(sh SessionHandle, cipher []byte) (int, error) {
+	var (
+		plainlen C.CK_ULONG
+	)
+	e := C.Decrypt(c.ctx, C.CK_SESSION_HANDLE(sh), cMessage(cipher), C.CK_ULONG(len(cipher)), nil, &plainlen)
+	if toError(e) != nil {
+		return 0, toError(e)
+	}
+	return int(plainlen), nil
+}
+
 // DecryptUpdate continues a multiple-part decryption operation.
 func (c *Ctx) DecryptUpdate(sh SessionHandle, cipher []byte) ([]byte, error) {
 	var (
@@ -1270,6 +1303,18 @@ func (c *Ctx) Digest(sh SessionHandle, message []byte) ([]byte, error) {
 	h := C.GoBytes(unsafe.Pointer(hash), C.int(hashlen))
 	C.free(unsafe.Pointer(hash))
 	return h, nil
+}
+
+// DigestNull digests message in a single part.
+func (c *Ctx) DigestNull(sh SessionHandle, message []byte) (int, error) {
+	var (
+		hashlen C.CK_ULONG
+	)
+	e := C.Digest(c.ctx, C.CK_SESSION_HANDLE(sh), cMessage(message), C.CK_ULONG(len(message)), nil, &hashlen)
+	if toError(e) != nil {
+		return 0, toError(e)
+	}
+	return int(hashlen), nil
 }
 
 // DigestUpdate continues a multiple-part message-digesting operation.
@@ -1331,6 +1376,19 @@ func (c *Ctx) Sign(sh SessionHandle, message []byte) ([]byte, error) {
 	s := C.GoBytes(unsafe.Pointer(sig), C.int(siglen))
 	C.free(unsafe.Pointer(sig))
 	return s, nil
+}
+
+// Sign signs (encrypts with private key) data in a single part, where the signature
+// is (will be) an appendix to the data, and plaintext cannot be recovered from the signature.
+func (c *Ctx) SignNull(sh SessionHandle, message []byte) (int, error) {
+	var (
+		siglen C.CK_ULONG
+	)
+	e := C.Sign(c.ctx, C.CK_SESSION_HANDLE(sh), cMessage(message), C.CK_ULONG(len(message)), nil, &siglen)
+	if toError(e) != nil {
+		return 0, toError(e)
+	}
+	return int(siglen), nil
 }
 
 // SignUpdate continues a multiple-part signature operation,
